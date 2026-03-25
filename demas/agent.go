@@ -10,21 +10,22 @@ import (
 )
 
 const (
-	NumAgents             = 100 * 100
+	NumAgents             = 10_000
 	NumIslands            = 100
 	InitialEnergy         = 10
 	EnergyTransfer        = 1
 	ReproductionThreshold = 15
 	ChildEnergy           = 5
 	DeathThreshold        = 0
-	SameIslandProbability = 0.9
+	SameIslandProbability = 0.9999
 )
 
 type Log struct {
-	From       string
-	Msg        string
-	Score      float64
-	sameIsland bool
+	From            string
+	Msg             string
+	Score           float64
+	sameIsland      bool
+	PrimaryIslandId int
 }
 
 type Message struct {
@@ -38,26 +39,35 @@ type LogCollector struct {
 	LogCh chan Log
 }
 
-func (lc *LogCollector) Run() {
+func (lc *LogCollector) Run(ctx context.Context) {
 	sameIslandLogs := 0
 	differentIslandLogs := 0
 	minimum_distance := math.Inf(1)
+	counts := make(map[int]int)
 	for {
 		select {
+		case <-ctx.Done():
+			for k, v := range counts {
+				fmt.Printf("%d -> %d\n", k, v)
+			}
+			return
+
 		case log := <-lc.LogCh:
+			counts[log.PrimaryIslandId]++
 			if log.Score < minimum_distance {
 				minimum_distance = log.Score
-				fmt.Println("new minimum:", minimum_distance)
+				fmt.Println("new minimum:", minimum_distance, "discovered on island: ", log.PrimaryIslandId)
 			}
 			if log.sameIsland {
 				sameIslandLogs++
 			} else {
 				differentIslandLogs++
 			}
-			// if (sameIslandLogs+differentIslandLogs)%1000 == 0 {
-			// 	fmt.Println("SAME ISLANDS: ", sameIslandLogs, " DIFFERENT ISLANDS: ", differentIslandLogs)
-			// 	fmt.Println("PERCENTAGE: ", float64(sameIslandLogs)/float64(sameIslandLogs+differentIslandLogs))
-			// }
+			if (sameIslandLogs+differentIslandLogs)%1_000_000 == 0 {
+				fmt.Println("Meetings: ", (sameIslandLogs+differentIslandLogs)/1_000_000, " mln")
+				fmt.Println("SAME ISLANDS: ", sameIslandLogs, " DIFFERENT ISLANDS: ", differentIslandLogs)
+				fmt.Println("PERCENTAGE: ", float64(sameIslandLogs)/float64(sameIslandLogs+differentIslandLogs))
+			}
 		}
 	}
 }
@@ -130,8 +140,9 @@ func (a *Agent[S]) runMeetingAsResponder(ctx context.Context, sessionCh chan Mes
 	}
 
 	a.LogCh <- Log{
-		Score:      a.Score,
-		sameIsland: a.PrimaryIsland == msg.Body,
+		Score:           a.Score,
+		sameIsland:      a.PrimaryIsland == msg.Body,
+		PrimaryIslandId: a.PrimaryIsland,
 	}
 }
 
@@ -141,7 +152,7 @@ func (a *Agent[S]) Run(ctx context.Context) {
 		ping := a.newHandshakeMessage()
 
 		if a.Energy >= ReproductionThreshold {
-			child := NewChildAgent[S](a, "CHILD", ChildEnergy)
+			child := NewChildAgent(a, "CHILD", ChildEnergy)
 			a.Energy -= ChildEnergy
 			go child.Run(ctx)
 		} else if a.Energy <= DeathThreshold {
@@ -204,27 +215,28 @@ func main() {
 	logger := LogCollector{
 		LogCh: logChan,
 	}
-	go logger.Run()
+	go logger.Run(ctx)
 
 	cities := GenerateRandomCities(100, -100, 100)
 	problem := NewTSPProblem(cities)
 
 	islands := make([]chan Message, NumIslands)
-	for i := 0; i < NumIslands; i++ {
-		islands[i] = make(chan Message, 16)
+	for i := range NumIslands {
+		islands[i] = make(chan Message, int64(math.Sqrt(NumAgents/NumIslands)))
 	}
 
 	agents := make([]Agent[TSPSolution], NumAgents)
-	for i := 0; i < NumAgents; i++ {
-		agents[i] = NewAgent[TSPSolution](strconv.Itoa(i), islands, logChan, InitialEnergy, problem)
+	for i := range NumAgents {
+		agents[i] = NewAgent(strconv.Itoa(i), islands, logChan, InitialEnergy, problem)
 	}
 
-	for i := 0; i < NumAgents; i++ {
+	for i := range NumAgents {
 		go agents[i].Run(ctx)
 	}
 
-	time.Sleep(360 * time.Second)
+	time.Sleep(120 * time.Second)
 	cancel()
 
 	fmt.Println("simple heuristic: ", NearestNeighbourTSP(problem, 0))
+	time.Sleep(5 * time.Second)
 }
