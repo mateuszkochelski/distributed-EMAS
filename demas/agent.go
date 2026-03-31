@@ -10,6 +10,12 @@ import (
 )
 
 const (
+	ModeTSP        = "tsp"
+	ModeContinuous = "continuous"
+	ProblemMode    = ModeContinuous
+)
+
+const (
 	NumAgents             = 10_000
 	NumIslands            = 100
 	InitialEnergy         = 10
@@ -208,24 +214,19 @@ func NewAgent[S any](id string, islands []chan Message, logCh chan Log, initialE
 	}
 }
 
-func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-
+func runSimulation[S any](ctx context.Context, problem Problem[S]) {
 	logChan := make(chan Log, 1000)
 	logger := LogCollector{
 		LogCh: logChan,
 	}
 	go logger.Run(ctx)
 
-	cities := GenerateRandomCities(100, -100, 100)
-	problem := NewTSPProblem(cities)
-
 	islands := make([]chan Message, NumIslands)
 	for i := range NumIslands {
 		islands[i] = make(chan Message, int64(math.Sqrt(NumAgents/NumIslands)))
 	}
 
-	agents := make([]Agent[TSPSolution], NumAgents)
+	agents := make([]Agent[S], NumAgents)
 	for i := range NumAgents {
 		agents[i] = NewAgent(strconv.Itoa(i), islands, logChan, InitialEnergy, problem)
 	}
@@ -233,10 +234,42 @@ func main() {
 	for i := range NumAgents {
 		go agents[i].Run(ctx)
 	}
+}
+
+func runTSP(ctx context.Context) {
+	cities := GenerateRandomCities(100, -100, 100)
+	problem := NewTSPProblem(cities)
+	runSimulation(ctx, problem)
+
+	<-ctx.Done()
+	fmt.Println("simple heuristic: ", NearestNeighbourTSP(problem, 0))
+}
+
+func runContinuous(ctx context.Context) {
+	problem := ContinuousProblem{
+		Dim:       30,
+		Lower:     -5.12,
+		Upper:     5.12,
+		Sigma:     0.2,
+		Objective: Rastrigin,
+	}
+	runSimulation(ctx, problem)
+
+	<-ctx.Done()
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	switch ProblemMode {
+	case ModeContinuous:
+		go runContinuous(ctx)
+	case ModeTSP:
+		go runTSP(ctx)
+	default:
+		panic("unknown ProblemMode")
+	}
 
 	time.Sleep(120 * time.Second)
 	cancel()
-
-	fmt.Println("simple heuristic: ", NearestNeighbourTSP(problem, 0))
 	time.Sleep(5 * time.Second)
 }
