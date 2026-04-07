@@ -33,15 +33,14 @@ func parseMode(args []string) (Mode, error) {
 		}
 
 		const prefix = "-mode="
-		if strings.HasPrefix(arg, prefix) {
-			mode = Mode(strings.TrimPrefix(arg, prefix))
+		if after, ok := strings.CutPrefix(arg, prefix); ok {
+			mode = Mode(after)
 		}
 	}
 
-	switch mode {
-	case ModeTSP, ModeContinuous:
+	if isValidMode(mode) {
 		return mode, nil
-	default:
+	} else {
 		return "", fmt.Errorf("invalid mode %q, expected one of: %q, %q", mode, ModeTSP, ModeContinuous)
 	}
 }

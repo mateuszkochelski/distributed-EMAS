@@ -7,14 +7,14 @@ import (
 )
 
 type SimulationConfig struct {
-	NumAgents             int
-	NumIslands            int
-	InitialEnergy         int
-	EnergyTransfer        int
-	ReproductionThreshold int
-	ChildEnergy           int
-	DeathThreshold        int
-	SameIslandProbability float64
+	NumAgents             int     `json:"num_agents"`
+	NumIslands            int     `json:"num_islands"`
+	InitialEnergy         int     `json:"initial_energy"`
+	EnergyTransfer        int     `json:"energy_transfer"`
+	ReproductionThreshold int     `json:"reproduction_threshold"`
+	ChildEnergy           int     `json:"child_energy"`
+	DeathThreshold        int     `json:"death_threshold"`
+	SameIslandProbability float64 `json:"same_island_probability"`
 }
 
 func DefaultSimulationConfig() SimulationConfig {

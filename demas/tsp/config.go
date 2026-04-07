@@ -13,11 +13,11 @@ const (
 )
 
 type Config struct {
-	Source    Source
-	NumCities int
-	MinCoord  float64
-	MaxCoord  float64
-	InputFile string
+	Source    Source  `json:"source"`
+	NumCities int     `json:"num_cities"`
+	MinCoord  float64 `json:"min_coord"`
+	MaxCoord  float64 `json:"max_coord"`
+	InputFile string  `json:"input_file"`
 }
 
 func DefaultConfig() Config {
@@ -57,4 +57,3 @@ func (c Config) Validate() error {
 
 	return nil
 }
-

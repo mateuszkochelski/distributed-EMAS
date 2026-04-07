@@ -14,11 +14,11 @@ const (
 )
 
 type Config struct {
-	Dim       int
-	Lower     float64
-	Upper     float64
-	Sigma     float64
-	Objective Objective
+	Dim       int       `json:"dim"`
+	Lower     float64   `json:"lower"`
+	Upper     float64   `json:"upper"`
+	Sigma     float64   `json:"sigma"`
+	Objective Objective `json:"objective"`
 }
 
 func DefaultConfig() Config {

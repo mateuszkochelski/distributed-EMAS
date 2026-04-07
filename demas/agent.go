@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"math"
 	"math/rand/v2"
-	"strconv"
+
+	"github.com/mateuszkochelski/tsp-emas/stats"
 )
 
 type Message struct {
@@ -21,7 +21,7 @@ type Agent[S any] struct {
 	IslandsChs    []chan Message
 	InboxCh       chan Message
 	PrimaryIsland int
-	LogCh         chan Log
+	EventCh       chan stats.Event
 
 	Solution S
 	Score    float64
@@ -52,6 +52,13 @@ func (a *Agent[S]) CreateMeetingMessage(score float64) Message {
 	}
 }
 
+func (a *Agent[S]) emitEvent(event stats.Event) {
+	select {
+	case a.EventCh <- event:
+	default:
+	}
+}
+
 func (a *Agent[S]) resolveMeeting(reply Message) {
 	enemyScore := reply.Score
 
@@ -61,12 +68,12 @@ func (a *Agent[S]) resolveMeeting(reply Message) {
 		a.Energy -= a.Config.EnergyTransfer
 	}
 
-	a.LogCh <- Log{
+	a.emitEvent(stats.Event{
 		Score:           a.Score,
 		SameIsland:      a.PrimaryIsland == reply.PrimaryIslandId,
-		PrimaryIslandId: a.PrimaryIsland,
-		EventType:       "MEETING",
-	}
+		PrimaryIslandID: a.PrimaryIsland,
+		EventType:       stats.EventMeeting,
+	})
 }
 
 func (a *Agent[S]) runMeetingAsResponder(incoming Message) {
@@ -82,19 +89,19 @@ func (a *Agent[S]) Run(ctx context.Context) {
 			child := NewChildAgent(a, "CHILD")
 			a.Energy -= a.Config.ChildEnergy
 
-			a.LogCh <- Log{
+			a.emitEvent(stats.Event{
 				Score:           a.Score,
-				PrimaryIslandId: a.PrimaryIsland,
-				EventType:       "BORN",
-			}
+				PrimaryIslandID: a.PrimaryIsland,
+				EventType:       stats.EventBorn,
+			})
 
 			go child.Run(ctx)
 		} else if a.Energy <= a.Config.DeathThreshold {
-			a.LogCh <- Log{
+			a.emitEvent(stats.Event{
 				Score:           a.Score,
-				PrimaryIslandId: a.PrimaryIsland,
-				EventType:       "DEAD",
-			}
+				PrimaryIslandID: a.PrimaryIsland,
+				EventType:       stats.EventDead,
+			})
 			return
 		}
 
@@ -122,7 +129,7 @@ func NewChildAgent[S any](parent *Agent[S], id string) Agent[S] {
 		InboxCh:       make(chan Message),
 		IslandsChs:    parent.IslandsChs,
 		PrimaryIsland: parent.PrimaryIsland,
-		LogCh:         parent.LogCh,
+		EventCh:       parent.EventCh,
 		Solution:      childSolution,
 		Score:         childScore,
 		Problem:       parent.Problem,
@@ -133,7 +140,7 @@ func NewChildAgent[S any](parent *Agent[S], id string) Agent[S] {
 func NewAgent[S any](
 	id string,
 	islands []chan Message,
-	logCh chan Log,
+	eventCh chan stats.Event,
 	problem Problem[S],
 	config *SimulationConfig,
 ) Agent[S] {
@@ -145,40 +152,10 @@ func NewAgent[S any](
 		InboxCh:       make(chan Message),
 		IslandsChs:    islands,
 		PrimaryIsland: rand.IntN(len(islands)),
-		LogCh:         logCh,
+		EventCh:       eventCh,
 		Solution:      solution,
 		Score:         problem.Evaluate(solution),
 		Problem:       problem,
 		Config:        config,
-	}
-}
-
-func runSimulation[S any](ctx context.Context, problem Problem[S], config *SimulationConfig) {
-	logChan := make(chan Log, 1024)
-	islands := make([]chan Message, config.NumIslands)
-
-	bufferSize := max(int(math.Sqrt(float64(config.NumAgents/config.NumIslands))), 1)
-
-	for i := range islands {
-		islands[i] = make(chan Message, bufferSize)
-	}
-
-	agentsPerIsland := make(map[int]int)
-	agents := make([]Agent[S], config.NumAgents)
-
-	for i := range agents {
-		agents[i] = NewAgent(strconv.Itoa(i), islands, logChan, problem, config)
-		agentsPerIsland[agents[i].PrimaryIsland]++
-	}
-
-	logger := LogCollector{
-		LogCh:           logChan,
-		AgentsPerIsland: agentsPerIsland,
-	}
-
-	go logger.Run(ctx)
-
-	for i := range agents {
-		go agents[i].Run(ctx)
 	}
 }

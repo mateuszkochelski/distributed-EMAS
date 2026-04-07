@@ -11,3 +11,12 @@ var AllModes = []Mode{
 	ModeTSP,
 	ModeContinuous,
 }
+
+func isValidMode(mode Mode) bool {
+	for _, m := range AllModes {
+		if mode == m {
+			return true
+		}
+	}
+	return false
+}
