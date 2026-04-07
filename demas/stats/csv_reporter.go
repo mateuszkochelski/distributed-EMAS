@@ -40,7 +40,7 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 
 	islandsFile, err := os.Create(islandsPath)
 	if err != nil {
-		_ = globalFile.Close()
+		globalFile.Close()
 		return nil, fmt.Errorf("create island stats file: %w", err)
 	}
 
@@ -59,8 +59,8 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 		"best_score",
 		"total_agents",
 	}); err != nil {
-		_ = globalFile.Close()
-		_ = islandsFile.Close()
+		globalFile.Close()
+		islandsFile.Close()
 		return nil, fmt.Errorf("write global CSV header: %w", err)
 	}
 
@@ -73,8 +73,8 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 		"agents",
 		"meetings",
 	}); err != nil {
-		_ = globalFile.Close()
-		_ = islandsFile.Close()
+		globalFile.Close()
+		islandsFile.Close()
 		return nil, fmt.Errorf("write island CSV header: %w", err)
 	}
 
@@ -218,3 +218,4 @@ func joinErrors(errs []error) error {
 	}
 	return fmt.Errorf("%s", msg.String())
 }
+
