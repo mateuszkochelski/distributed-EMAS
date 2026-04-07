@@ -2,85 +2,21 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/rand/v2"
 	"strconv"
-	"time"
 )
 
-const (
-	ModeTSP        = "tsp"
-	ModeContinuous = "continuous"
-	ProblemMode    = ModeContinuous
-)
-
-const (
-	NumAgents             = 10_000
-	NumIslands            = 100
-	InitialEnergy         = 10
-	EnergyTransfer        = 1
-	ReproductionThreshold = 15
-	ChildEnergy           = 5
-	DeathThreshold        = 0
-	SameIslandProbability = 0.9999
-)
-
-type Log struct {
+type Message struct {
 	From            string
-	Msg             string
 	Score           float64
-	sameIsland      bool
+	Body            int
+	ResponseCh      chan Message
 	PrimaryIslandId int
 }
 
-type Message struct {
-	From       string
-	Score      float64
-	Body       int
-	ResponseCh chan Message
-}
-
-type LogCollector struct {
-	LogCh chan Log
-}
-
-func (lc *LogCollector) Run(ctx context.Context) {
-	sameIslandLogs := 0
-	differentIslandLogs := 0
-	minimum_distance := math.Inf(1)
-	counts := make(map[int]int)
-	for {
-		select {
-		case <-ctx.Done():
-			for k, v := range counts {
-				fmt.Printf("%d -> %d\n", k, v)
-			}
-			return
-
-		case log := <-lc.LogCh:
-			counts[log.PrimaryIslandId]++
-			if log.Score < minimum_distance {
-				minimum_distance = log.Score
-				fmt.Println("new minimum:", minimum_distance, "discovered on island: ", log.PrimaryIslandId)
-			}
-			if log.sameIsland {
-				sameIslandLogs++
-			} else {
-				differentIslandLogs++
-			}
-			if (sameIslandLogs+differentIslandLogs)%1_000_000 == 0 {
-				fmt.Println("Meetings: ", (sameIslandLogs+differentIslandLogs)/1_000_000, " mln")
-				fmt.Println("SAME ISLANDS: ", sameIslandLogs, " DIFFERENT ISLANDS: ", differentIslandLogs)
-				fmt.Println("PERCENTAGE: ", float64(sameIslandLogs)/float64(sameIslandLogs+differentIslandLogs))
-			}
-		}
-	}
-}
-
 type Agent[S any] struct {
-	ID string
-	// Tour          []int
+	ID            string
 	Energy        int
 	IslandsChs    []chan Message
 	InboxCh       chan Message
@@ -90,10 +26,11 @@ type Agent[S any] struct {
 	Solution S
 	Score    float64
 	Problem  Problem[S]
+	Config   *SimulationConfig
 }
 
 func (a *Agent[S]) selectTargetIslandCh() chan Message {
-	if rand.Float64() < SameIslandProbability || len(a.IslandsChs) == 1 {
+	if rand.Float64() < a.Config.SameIslandProbability || len(a.IslandsChs) == 1 {
 		return a.IslandsChs[a.PrimaryIsland]
 	}
 
@@ -105,63 +42,59 @@ func (a *Agent[S]) selectTargetIslandCh() chan Message {
 	return a.IslandsChs[targetIdx]
 }
 
-func (a *Agent[S]) newHandshakeMessage() Message {
-	return Message{
-		From:       a.ID,
-		ResponseCh: a.InboxCh,
-	}
-}
-
 func (a *Agent[S]) CreateMeetingMessage(score float64) Message {
 	return Message{
-		From:       a.ID,
-		Score:      score,
-		Body:       a.PrimaryIsland,
-		ResponseCh: a.InboxCh,
+		From:            a.ID,
+		Score:           score,
+		Body:            a.PrimaryIsland,
+		ResponseCh:      a.InboxCh,
+		PrimaryIslandId: a.PrimaryIsland,
 	}
 }
 
-func (a *Agent[S]) runMeetingAsInitiator(ctx context.Context, sessionCh chan Message) {
-	sessionCh <- a.CreateMeetingMessage(a.Score)
-	msg := <-a.InboxCh
-
-	enemyScore := msg.Score
-	if a.Problem.IsBetter(a.Score, enemyScore) {
-		a.Energy += EnergyTransfer
-	} else if a.Problem.IsBetter(enemyScore, a.Score) {
-		a.Energy -= EnergyTransfer
-	}
-}
-
-func (a *Agent[S]) runMeetingAsResponder(ctx context.Context, sessionCh chan Message) {
-	msg := <-sessionCh
-	enemyScore := msg.Score
-
-	msg.ResponseCh <- a.CreateMeetingMessage(a.Score)
+func (a *Agent[S]) resolveMeeting(reply Message) {
+	enemyScore := reply.Score
 
 	if a.Problem.IsBetter(a.Score, enemyScore) {
-		a.Energy += EnergyTransfer
+		a.Energy += a.Config.EnergyTransfer
 	} else if a.Problem.IsBetter(enemyScore, a.Score) {
-		a.Energy -= EnergyTransfer
+		a.Energy -= a.Config.EnergyTransfer
 	}
 
 	a.LogCh <- Log{
 		Score:           a.Score,
-		sameIsland:      a.PrimaryIsland == msg.Body,
+		SameIsland:      a.PrimaryIsland == reply.PrimaryIslandId,
 		PrimaryIslandId: a.PrimaryIsland,
+		EventType:       "MEETING",
 	}
+}
+
+func (a *Agent[S]) runMeetingAsResponder(incoming Message) {
+	incoming.ResponseCh <- a.CreateMeetingMessage(a.Score)
+	a.resolveMeeting(incoming)
 }
 
 func (a *Agent[S]) Run(ctx context.Context) {
 	for {
 		target := a.selectTargetIslandCh()
-		ping := a.newHandshakeMessage()
 
-		if a.Energy >= ReproductionThreshold {
-			child := NewChildAgent(a, "CHILD", ChildEnergy)
-			a.Energy -= ChildEnergy
+		if a.Energy >= a.Config.ReproductionThreshold {
+			child := NewChildAgent(a, "CHILD")
+			a.Energy -= a.Config.ChildEnergy
+
+			a.LogCh <- Log{
+				Score:           a.Score,
+				PrimaryIslandId: a.PrimaryIsland,
+				EventType:       "BORN",
+			}
+
 			go child.Run(ctx)
-		} else if a.Energy <= DeathThreshold {
+		} else if a.Energy <= a.Config.DeathThreshold {
+			a.LogCh <- Log{
+				Score:           a.Score,
+				PrimaryIslandId: a.PrimaryIsland,
+				EventType:       "DEAD",
+			}
 			return
 		}
 
@@ -169,25 +102,23 @@ func (a *Agent[S]) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 
-		case target <- ping:
-			response := <-a.InboxCh
-			a.runMeetingAsInitiator(ctx, response.ResponseCh)
+		case target <- a.CreateMeetingMessage(a.Score):
+			reply := <-a.InboxCh
+			a.resolveMeeting(reply)
 
 		case incoming := <-a.IslandsChs[a.PrimaryIsland]:
-			pong := a.newHandshakeMessage()
-			incoming.ResponseCh <- pong
-			a.runMeetingAsResponder(ctx, pong.ResponseCh)
+			a.runMeetingAsResponder(incoming)
 		}
 	}
 }
 
-func NewChildAgent[S any](parent *Agent[S], id string, childEnergy int) Agent[S] {
+func NewChildAgent[S any](parent *Agent[S], id string) Agent[S] {
 	childSolution := parent.Problem.MutateSolution(parent.Solution)
 	childScore := parent.Problem.Evaluate(childSolution)
 
 	return Agent[S]{
 		ID:            id,
-		Energy:        childEnergy,
+		Energy:        parent.Config.ChildEnergy,
 		InboxCh:       make(chan Message),
 		IslandsChs:    parent.IslandsChs,
 		PrimaryIsland: parent.PrimaryIsland,
@@ -195,81 +126,59 @@ func NewChildAgent[S any](parent *Agent[S], id string, childEnergy int) Agent[S]
 		Solution:      childSolution,
 		Score:         childScore,
 		Problem:       parent.Problem,
+		Config:        parent.Config,
 	}
 }
 
-func NewAgent[S any](id string, islands []chan Message, logCh chan Log, initialEnergy int, problem Problem[S]) Agent[S] {
+func NewAgent[S any](
+	id string,
+	islands []chan Message,
+	logCh chan Log,
+	problem Problem[S],
+	config *SimulationConfig,
+) Agent[S] {
 	solution := problem.NewRandomSolution()
+
 	return Agent[S]{
 		ID:            id,
-		Energy:        initialEnergy,
+		Energy:        config.InitialEnergy,
 		InboxCh:       make(chan Message),
 		IslandsChs:    islands,
 		PrimaryIsland: rand.IntN(len(islands)),
 		LogCh:         logCh,
-
-		Solution: solution,
-		Score:    problem.Evaluate(solution),
-		Problem:  problem,
+		Solution:      solution,
+		Score:         problem.Evaluate(solution),
+		Problem:       problem,
+		Config:        config,
 	}
 }
 
-func runSimulation[S any](ctx context.Context, problem Problem[S]) {
-	logChan := make(chan Log, 1000)
-	logger := LogCollector{
-		LogCh: logChan,
+func runSimulation[S any](ctx context.Context, problem Problem[S], config *SimulationConfig) {
+	logChan := make(chan Log, 1024)
+	islands := make([]chan Message, config.NumIslands)
+
+	bufferSize := max(int(math.Sqrt(float64(config.NumAgents/config.NumIslands))), 1)
+
+	for i := range islands {
+		islands[i] = make(chan Message, bufferSize)
 	}
+
+	agentsPerIsland := make(map[int]int)
+	agents := make([]Agent[S], config.NumAgents)
+
+	for i := range agents {
+		agents[i] = NewAgent(strconv.Itoa(i), islands, logChan, problem, config)
+		agentsPerIsland[agents[i].PrimaryIsland]++
+	}
+
+	logger := LogCollector{
+		LogCh:           logChan,
+		AgentsPerIsland: agentsPerIsland,
+	}
+
 	go logger.Run(ctx)
 
-	islands := make([]chan Message, NumIslands)
-	for i := range NumIslands {
-		islands[i] = make(chan Message, int64(math.Sqrt(NumAgents/NumIslands)))
-	}
-
-	agents := make([]Agent[S], NumAgents)
-	for i := range NumAgents {
-		agents[i] = NewAgent(strconv.Itoa(i), islands, logChan, InitialEnergy, problem)
-	}
-
-	for i := range NumAgents {
+	for i := range agents {
 		go agents[i].Run(ctx)
 	}
-}
-
-func runTSP(ctx context.Context) {
-	cities := GenerateRandomCities(100, -100, 100)
-	problem := NewTSPProblem(cities)
-	runSimulation(ctx, problem)
-
-	<-ctx.Done()
-	fmt.Println("simple heuristic: ", NearestNeighbourTSP(problem, 0))
-}
-
-func runContinuous(ctx context.Context) {
-	problem := ContinuousProblem{
-		Dim:       30,
-		Lower:     -5.12,
-		Upper:     5.12,
-		Sigma:     0.2,
-		Objective: Rastrigin,
-	}
-	runSimulation(ctx, problem)
-
-	<-ctx.Done()
-}
-
-func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	switch ProblemMode {
-	case ModeContinuous:
-		go runContinuous(ctx)
-	case ModeTSP:
-		go runTSP(ctx)
-	default:
-		panic("unknown ProblemMode")
-	}
-
-	time.Sleep(120 * time.Second)
-	cancel()
-	time.Sleep(5 * time.Second)
 }

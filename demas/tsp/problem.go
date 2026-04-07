@@ -1,19 +1,19 @@
-package main
+package tsp
 
 import (
 	"math"
 	"math/rand/v2"
 )
 
-type TSPSolution struct {
+type Solution struct {
 	Tour []int
 }
 
-func (s TSPSolution) Clone() TSPSolution {
+func (s Solution) Clone() Solution {
 	tourCopy := make([]int, len(s.Tour))
 	copy(tourCopy, s.Tour)
 
-	return TSPSolution{
+	return Solution{
 		Tour: tourCopy,
 	}
 }
@@ -41,7 +41,7 @@ func GenerateRandomCities(n int, minCoord, maxCoord float64) []City {
 	return cities
 }
 
-type TSPProblem struct {
+type Problem struct {
 	Cities []City
 	Dist   []float64
 }
@@ -56,7 +56,7 @@ func BuildDistanceMatrix1D(cities []City) []float64 {
 	n := len(cities)
 	dist := make([]float64, n*n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		for j := i; j < n; j++ {
 			d := Distance(cities[i], cities[j])
 			dist[i*n+j] = d
@@ -67,24 +67,29 @@ func BuildDistanceMatrix1D(cities []City) []float64 {
 	return dist
 }
 
-func NewTSPProblem(cities []City) TSPProblem {
-	return TSPProblem{
+func NewProblem(cities []City) Problem {
+	return Problem{
 		Cities: cities,
 		Dist:   BuildDistanceMatrix1D(cities),
 	}
 }
 
-func (p TSPProblem) distance(i, j int) float64 {
+func NewRandomProblem(numCities int, minCoord, maxCoord float64) Problem {
+	cities := GenerateRandomCities(numCities, minCoord, maxCoord)
+	return NewProblem(cities)
+}
+
+func (p Problem) distance(i, j int) float64 {
 	return p.Dist[i*len(p.Cities)+j]
 }
 
-func (p TSPProblem) NewRandomSolution() TSPSolution {
-	return TSPSolution{
+func (p Problem) NewRandomSolution() Solution {
+	return Solution{
 		Tour: rand.Perm(len(p.Cities)),
 	}
 }
 
-func (p TSPProblem) MutateSolution(s TSPSolution) TSPSolution {
+func (p Problem) MutateSolution(s Solution) Solution {
 	mutated := s.Clone()
 	n := len(mutated.Tour)
 
@@ -106,19 +111,19 @@ func (p TSPProblem) MutateSolution(s TSPSolution) TSPSolution {
 	child = append(child, moved)
 	child = append(child, without[to:]...)
 
-	return TSPSolution{
+	return Solution{
 		Tour: child,
 	}
 }
 
-func (p TSPProblem) Evaluate(s TSPSolution) float64 {
+func (p Problem) Evaluate(s Solution) float64 {
 	n := len(s.Tour)
 	if n < 2 {
 		return 0
 	}
 
 	var total float64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		from := s.Tour[i]
 		to := s.Tour[(i+1)%n]
 		total += p.distance(from, to)
@@ -127,7 +132,7 @@ func (p TSPProblem) Evaluate(s TSPSolution) float64 {
 	return total
 }
 
-func NearestNeighbourTSP(problem TSPProblem, start int) float64 {
+func NearestNeighbourTSP(problem Problem, start int) float64 {
 	n := len(problem.Cities)
 	if start < 0 || start >= n {
 		start = 0
@@ -144,7 +149,7 @@ func NearestNeighbourTSP(problem TSPProblem, start int) float64 {
 		bestCity := -1
 		bestDist := math.Inf(1)
 
-		for candidate := 0; candidate < n; candidate++ {
+		for candidate := range n {
 			if visited[candidate] {
 				continue
 			}
@@ -160,11 +165,12 @@ func NearestNeighbourTSP(problem TSPProblem, start int) float64 {
 		tour = append(tour, bestCity)
 		current = bestCity
 	}
-	return problem.Evaluate(TSPSolution{
+	return problem.Evaluate(Solution{
 		Tour: tour,
 	})
 }
 
-func (p TSPProblem) IsBetter(newScore, oldScore float64) bool {
+func (p Problem) IsBetter(newScore, oldScore float64) bool {
 	return newScore < oldScore
 }
+
