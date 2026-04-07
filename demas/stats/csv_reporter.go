@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,13 +22,12 @@ type CSVReporter struct {
 
 	startedAt     time.Time
 	snapshotIndex int
-
-	interval time.Duration
+	interval      time.Duration
 }
 
 func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSVReporter, error) {
 	if err := os.MkdirAll(runInfo.OutputDir, 0o755); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create output dir: %w", err)
 	}
 
 	globalPath := filepath.Join(runInfo.OutputDir, "global_stats.csv")
@@ -35,34 +35,36 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 
 	globalFile, err := os.Create(globalPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create global stats file: %w", err)
 	}
 
 	islandsFile, err := os.Create(islandsPath)
 	if err != nil {
-		globalFile.Close()
-		return nil, err
+		_ = globalFile.Close()
+		return nil, fmt.Errorf("create island stats file: %w", err)
 	}
 
 	globalCSV := csv.NewWriter(globalFile)
 	islandsCSV := csv.NewWriter(islandsFile)
 
-	// header global
-	_ = globalCSV.Write([]string{
+	if err := writeCSVRow(globalCSV, []string{
 		"run_id",
 		"timestamp",
 		"elapsed_ms",
 		"snapshot_index",
 		"total_meetings",
-		"same_island",
-		"cross_island",
-		"same_ratio",
+		"same_island_meetings",
+		"cross_island_meetings",
+		"same_island_ratio",
 		"best_score",
 		"total_agents",
-	})
+	}); err != nil {
+		_ = globalFile.Close()
+		_ = islandsFile.Close()
+		return nil, fmt.Errorf("write global CSV header: %w", err)
+	}
 
-	// header islands
-	_ = islandsCSV.Write([]string{
+	if err := writeCSVRow(islandsCSV, []string{
 		"run_id",
 		"timestamp",
 		"elapsed_ms",
@@ -70,10 +72,11 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 		"island_id",
 		"agents",
 		"meetings",
-	})
-
-	globalCSV.Flush()
-	islandsCSV.Flush()
+	}); err != nil {
+		_ = globalFile.Close()
+		_ = islandsFile.Close()
+		return nil, fmt.Errorf("write island CSV header: %w", err)
+	}
 
 	return &CSVReporter{
 		Store:         store,
@@ -83,75 +86,135 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 		islandsFile:   islandsFile,
 		islandsCSV:    islandsCSV,
 		startedAt:     time.Now(),
-		interval:      interval,
 		snapshotIndex: 0,
+		interval:      interval,
 	}, nil
 }
 
 func (r *CSVReporter) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
-	defer r.close()
+
+	defer func() {
+		if err := r.close(); err != nil {
+			fmt.Fprintf(os.Stderr, "csv reporter close error: %v\n", err)
+		}
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
-			r.writeSnapshot(r.Store.Snapshot())
+			if err := r.writeSnapshot(r.Store.Snapshot()); err != nil {
+				fmt.Fprintf(os.Stderr, "csv reporter final snapshot error: %v\n", err)
+			}
 			return
+
 		case <-ticker.C:
-			r.writeSnapshot(r.Store.Snapshot())
+			if err := r.writeSnapshot(r.Store.Snapshot()); err != nil {
+				fmt.Fprintf(os.Stderr, "csv reporter periodic snapshot error: %v\n", err)
+			}
 		}
 	}
 }
 
-func (r *CSVReporter) writeSnapshot(s Snapshot) {
+func (r *CSVReporter) writeSnapshot(s Snapshot) error {
 	now := time.Now()
-	ts := now.Format(time.RFC3339Nano)
-	elapsed := now.Sub(r.startedAt).Milliseconds()
+	timestamp := now.Format(time.RFC3339Nano)
+	elapsedMS := now.Sub(r.startedAt).Milliseconds()
 
 	totalAgents := 0
-	for _, v := range s.AgentsPerIsland {
-		totalAgents += v
+	for _, count := range s.AgentsPerIsland {
+		totalAgents += count
 	}
 
-	// global row
-	_ = r.globalCSV.Write([]string{
+	if err := writeCSVRow(r.globalCSV, []string{
 		r.RunInfo.RunID,
-		ts,
-		strconv.FormatInt(elapsed, 10),
+		timestamp,
+		strconv.FormatInt(elapsedMS, 10),
 		strconv.Itoa(r.snapshotIndex),
 		strconv.Itoa(s.TotalMeetings),
 		strconv.Itoa(s.SameIslandMeetings),
 		strconv.Itoa(s.CrossIslandMeetings),
-		fmt.Sprintf("%.6f", s.SameIslandRatio()),
-		fmt.Sprintf("%.6f", s.BestScore),
+		fmt.Sprintf("%.8f", s.SameIslandRatio()),
+		fmt.Sprintf("%.8f", s.BestScore),
 		strconv.Itoa(totalAgents),
-	})
-
-	// per island rows
-	for id, agents := range s.AgentsPerIsland {
-		meetings := s.MeetingsPerIsland[id]
-
-		_ = r.islandsCSV.Write([]string{
-			r.RunInfo.RunID,
-			ts,
-			strconv.FormatInt(elapsed, 10),
-			strconv.Itoa(r.snapshotIndex),
-			strconv.Itoa(id),
-			strconv.Itoa(agents),
-			strconv.Itoa(meetings),
-		})
+	}); err != nil {
+		return fmt.Errorf("write global snapshot row: %w", err)
 	}
 
-	r.globalCSV.Flush()
-	r.islandsCSV.Flush()
+	for islandID, agents := range s.AgentsPerIsland {
+		meetings := s.MeetingsPerIsland[islandID]
+
+		if err := writeCSVRow(r.islandsCSV, []string{
+			r.RunInfo.RunID,
+			timestamp,
+			strconv.FormatInt(elapsedMS, 10),
+			strconv.Itoa(r.snapshotIndex),
+			strconv.Itoa(islandID),
+			strconv.Itoa(agents),
+			strconv.Itoa(meetings),
+		}); err != nil {
+			return fmt.Errorf("write island snapshot row for island %d: %w", islandID, err)
+		}
+	}
 
 	r.snapshotIndex++
+	return nil
 }
 
-func (r *CSVReporter) close() {
+func (r *CSVReporter) close() error {
+	var errs []error
+
 	r.globalCSV.Flush()
+	if err := r.globalCSV.Error(); err != nil {
+		errs = append(errs, fmt.Errorf("flush global csv: %w", err))
+	}
+
 	r.islandsCSV.Flush()
-	_ = r.globalFile.Close()
-	_ = r.islandsFile.Close()
+	if err := r.islandsCSV.Error(); err != nil {
+		errs = append(errs, fmt.Errorf("flush islands csv: %w", err))
+	}
+
+	if err := r.globalFile.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close global csv file: %w", err))
+	}
+
+	if err := r.islandsFile.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close islands csv file: %w", err))
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+
+	return joinErrors(errs)
+}
+
+func writeCSVRow(w *csv.Writer, row []string) error {
+	if err := w.Write(row); err != nil {
+		return err
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func joinErrors(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+
+	var msg strings.Builder
+	msg.WriteString(errs[0].Error())
+	for i := 1; i < len(errs); i++ {
+		msg.WriteString("; " + errs[i].Error())
+	}
+	return fmt.Errorf("%s", msg.String())
 }
