@@ -5,4 +5,5 @@ type Problem[S any] interface {
 	MutateSolution(S) S
 	Evaluate(S) float64
 	IsBetter(newScore, oldScore float64) bool
+	Maximum() float64
 }
