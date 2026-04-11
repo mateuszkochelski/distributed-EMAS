@@ -53,10 +53,7 @@ func (a *Agent[S]) CreateMeetingMessage(score float64) Message {
 }
 
 func (a *Agent[S]) emitEvent(event stats.Event) {
-	select {
-	case a.EventCh <- event:
-	default:
-	}
+	a.EventCh <- event
 }
 
 func (a *Agent[S]) resolveMeeting(reply Message) {
@@ -67,13 +64,14 @@ func (a *Agent[S]) resolveMeeting(reply Message) {
 	} else if a.Problem.IsBetter(enemyScore, a.Score) {
 		a.Energy -= a.Config.EnergyTransfer
 	}
-
-	a.emitEvent(stats.Event{
-		Score:           a.Score,
-		SameIsland:      a.PrimaryIsland == reply.PrimaryIslandId,
-		PrimaryIslandID: a.PrimaryIsland,
-		EventType:       stats.EventMeeting,
-	})
+	if a.Config.LogMeetings {
+		a.emitEvent(stats.Event{
+			Score:           a.Score,
+			SameIsland:      a.PrimaryIsland == reply.PrimaryIslandId,
+			PrimaryIslandID: a.PrimaryIsland,
+			EventType:       stats.EventMeeting,
+		})
+	}
 }
 
 func (a *Agent[S]) runMeetingAsResponder(incoming Message) {

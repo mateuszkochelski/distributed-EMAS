@@ -2,9 +2,12 @@ package stats
 
 type Snapshot struct {
 	TotalMeetings       int
+	TotalBornAgents     int
+	TotalDeadAgents     int
 	SameIslandMeetings  int
 	CrossIslandMeetings int
 	BestScore           float64
+	BestIsland          int
 
 	AgentsPerIsland   map[int]int
 	MeetingsPerIsland map[int]int

@@ -15,6 +15,7 @@ type SimulationConfig struct {
 	ChildEnergy           int     `json:"child_energy"`
 	DeathThreshold        int     `json:"death_threshold"`
 	SameIslandProbability float64 `json:"same_island_probability"`
+	LogMeetings           bool    `json:"log_meetings"`
 }
 
 func DefaultSimulationConfig() SimulationConfig {
@@ -27,6 +28,7 @@ func DefaultSimulationConfig() SimulationConfig {
 		ChildEnergy:           5,
 		DeathThreshold:        0,
 		SameIslandProbability: 0.999,
+		LogMeetings:           false,
 	}
 }
 
@@ -44,6 +46,7 @@ func BindSimulationFlags(fs *flag.FlagSet, cfg *SimulationConfig) {
 		cfg.SameIslandProbability,
 		"Probability of selecting the agent's own island",
 	)
+	fs.BoolVar(&cfg.LogMeetings, "log-meetings", cfg.LogMeetings, "Enable meeting statistics collection")
 }
 
 func (c SimulationConfig) Validate() error {

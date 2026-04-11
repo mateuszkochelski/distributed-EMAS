@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
-const (
-	RunDuration  = 300 * time.Second
-	ShutdownWait = 5 * time.Second
-)
+const ShutdownWait = 5 * time.Second
 
 func main() {
 	cfg, err := ParseCLI()
@@ -18,7 +18,10 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ctx, cancel := context.WithTimeout(baseCtx, cfg.RunDuration)
 	defer cancel()
 
 	switch cfg.Mode {
@@ -34,7 +37,7 @@ func main() {
 		}
 	}
 
-	time.Sleep(RunDuration)
-	cancel()
+	<-ctx.Done()
 	time.Sleep(ShutdownWait)
 }
+

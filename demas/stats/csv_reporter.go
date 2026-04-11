@@ -53,10 +53,13 @@ func NewCSVReporter(store *Store, runInfo RunInfo, interval time.Duration) (*CSV
 		"elapsed_ms",
 		"snapshot_index",
 		"total_meetings",
+		"total_born_agents",
+		"total_dead_agents",
 		"same_island_meetings",
 		"cross_island_meetings",
 		"same_island_ratio",
 		"best_score",
+		"best_island",
 		"total_agents",
 	}); err != nil {
 		globalFile.Close()
@@ -133,10 +136,13 @@ func (r *CSVReporter) writeSnapshot(s Snapshot) error {
 		strconv.FormatInt(elapsedMS, 10),
 		strconv.Itoa(r.snapshotIndex),
 		strconv.Itoa(s.TotalMeetings),
+		strconv.Itoa(s.TotalBornAgents),
+		strconv.Itoa(s.TotalDeadAgents),
 		strconv.Itoa(s.SameIslandMeetings),
 		strconv.Itoa(s.CrossIslandMeetings),
 		fmt.Sprintf("%.8f", s.SameIslandRatio()),
 		fmt.Sprintf("%.8f", s.BestScore),
+		strconv.Itoa(s.BestIsland),
 		strconv.Itoa(totalAgents),
 	}); err != nil {
 		return fmt.Errorf("write global snapshot row: %w", err)
@@ -218,4 +224,3 @@ func joinErrors(errs []error) error {
 	}
 	return fmt.Errorf("%s", msg.String())
 }
-

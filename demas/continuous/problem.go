@@ -67,6 +67,10 @@ func (p Problem) IsBetter(newScore, oldScore float64) bool {
 	return newScore < oldScore
 }
 
+func (p Problem) Maximum() float64 {
+	return math.Inf(1)
+}
+
 func Sphere(x []float64) float64 {
 	var sum float64
 	for _, xi := range x {

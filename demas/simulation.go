@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -13,9 +15,22 @@ import (
 	tsp "github.com/mateuszkochelski/tsp-emas/tsp"
 )
 
+func randomID(nBytes int) string {
+	b := make([]byte, nBytes)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
 func buildRunInfo(config *SimulationConfig, problemName string, problemConfig any) stats.RunInfo {
 	now := time.Now()
-	runID := fmt.Sprintf("%s-%s", problemName, now.Format("20060102-150405"))
+	runID := fmt.Sprintf(
+		"%s-%s-%s",
+		problemName,
+		now.Format("20060102-150405"),
+		randomID(6),
+	)
 
 	return stats.RunInfo{
 		RunID:            runID,
@@ -34,8 +49,10 @@ func setupStats(
 	problemName string,
 	problemConfig any,
 	eventCh chan stats.Event,
+	maximum float64,
+	isBetter func(newScore, currentBest float64) bool,
 ) error {
-	store := stats.NewStore(agentsPerIsland)
+	store := stats.NewStore(agentsPerIsland, maximum, isBetter)
 	collector := stats.NewCollector(eventCh, store)
 	consoleReporter := stats.NewConsoleReporter(store, 1_000_000, 1*time.Second)
 
@@ -81,7 +98,7 @@ func runSimulation[S any](
 		agentsPerIsland[agents[i].PrimaryIsland]++
 	}
 
-	if err := setupStats(ctx, agentsPerIsland, config, problemName, problemConfig, eventCh); err != nil {
+	if err := setupStats(ctx, agentsPerIsland, config, problemName, problemConfig, eventCh, problem.Maximum(), problem.IsBetter); err != nil {
 		fmt.Println(err)
 		return
 	}

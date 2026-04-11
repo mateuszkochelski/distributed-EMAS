@@ -174,3 +174,6 @@ func (p Problem) IsBetter(newScore, oldScore float64) bool {
 	return newScore < oldScore
 }
 
+func (p Problem) Maximum() float64 {
+	return math.Inf(1)
+}

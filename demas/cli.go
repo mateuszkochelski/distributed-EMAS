@@ -5,16 +5,20 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	continuous "github.com/mateuszkochelski/tsp-emas/continuous"
 	tsp "github.com/mateuszkochelski/tsp-emas/tsp"
 )
 
+const DefaultRunSeconds = 300
+
 type CLIConfig struct {
-	Mode       Mode
-	Simulation SimulationConfig
-	TSP        *tsp.Config
-	Continuous *continuous.Config
+	Mode        Mode
+	RunDuration time.Duration
+	Simulation  SimulationConfig
+	TSP         *tsp.Config
+	Continuous  *continuous.Config
 }
 
 func parseMode(args []string) (Mode, error) {
@@ -38,11 +42,11 @@ func parseMode(args []string) (Mode, error) {
 		}
 	}
 
-	if isValidMode(mode) {
-		return mode, nil
-	} else {
+	if !isValidMode(mode) {
 		return "", fmt.Errorf("invalid mode %q, expected one of: %q, %q", mode, ModeTSP, ModeContinuous)
 	}
+
+	return mode, nil
 }
 
 func ParseCLI() (CLIConfig, error) {
@@ -51,61 +55,81 @@ func ParseCLI() (CLIConfig, error) {
 		return CLIConfig{}, err
 	}
 
-	simCfg := DefaultSimulationConfig()
-
 	switch mode {
 	case ModeTSP:
-		tspCfg := tsp.DefaultConfig()
-
-		fs := flag.NewFlagSet("tsp", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
-
-		fs.String("mode", string(ModeTSP), "Problem mode: tsp or continuous")
-		BindSimulationFlags(fs, &simCfg)
-		tsp.BindFlags(fs, &tspCfg)
-
-		if err := fs.Parse(os.Args[1:]); err != nil {
-			return CLIConfig{}, err
-		}
-		if err := simCfg.Validate(); err != nil {
-			return CLIConfig{}, fmt.Errorf("invalid simulation config: %w", err)
-		}
-		if err := tspCfg.Validate(); err != nil {
-			return CLIConfig{}, fmt.Errorf("invalid tsp config: %w", err)
-		}
-
-		return CLIConfig{
-			Mode:       mode,
-			Simulation: simCfg,
-			TSP:        &tspCfg,
-		}, nil
-
+		return parseTSPCLI()
 	case ModeContinuous:
-		continuousCfg := continuous.DefaultConfig()
+		return parseContinuousCLI()
+	default:
+		return CLIConfig{}, fmt.Errorf("unsupported mode %q", mode)
+	}
+}
 
-		fs := flag.NewFlagSet("continuous", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
+func parseTSPCLI() (CLIConfig, error) {
+	simCfg := DefaultSimulationConfig()
+	tspCfg := tsp.DefaultConfig()
 
-		fs.String("mode", string(ModeContinuous), "Problem mode: tsp or continuous")
-		BindSimulationFlags(fs, &simCfg)
-		continuous.BindFlags(fs, &continuousCfg)
+	fs := flag.NewFlagSet("tsp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 
-		if err := fs.Parse(os.Args[1:]); err != nil {
-			return CLIConfig{}, err
-		}
-		if err := simCfg.Validate(); err != nil {
-			return CLIConfig{}, fmt.Errorf("invalid simulation config: %w", err)
-		}
-		if err := continuousCfg.Validate(); err != nil {
-			return CLIConfig{}, fmt.Errorf("invalid continuous config: %w", err)
-		}
+	fs.String("mode", string(ModeTSP), "Problem mode: tsp or continuous")
+	runSeconds := fs.Int("run-seconds", DefaultRunSeconds, "Simulation duration in seconds")
 
-		return CLIConfig{
-			Mode:       mode,
-			Simulation: simCfg,
-			Continuous: &continuousCfg,
-		}, nil
+	BindSimulationFlags(fs, &simCfg)
+	tsp.BindFlags(fs, &tspCfg)
+
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return CLIConfig{}, err
+	}
+	if err := simCfg.Validate(); err != nil {
+		return CLIConfig{}, fmt.Errorf("invalid simulation config: %w", err)
+	}
+	if err := tspCfg.Validate(); err != nil {
+		return CLIConfig{}, fmt.Errorf("invalid tsp config: %w", err)
+	}
+	if *runSeconds <= 0 {
+		return CLIConfig{}, fmt.Errorf("invalid run-seconds %d: must be > 0", *runSeconds)
 	}
 
-	return CLIConfig{}, fmt.Errorf("unsupported mode %q", mode)
+	return CLIConfig{
+		Mode:        ModeTSP,
+		RunDuration: time.Duration(*runSeconds) * time.Second,
+		Simulation:  simCfg,
+		TSP:         &tspCfg,
+	}, nil
 }
+
+func parseContinuousCLI() (CLIConfig, error) {
+	simCfg := DefaultSimulationConfig()
+	continuousCfg := continuous.DefaultConfig()
+
+	fs := flag.NewFlagSet("continuous", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	fs.String("mode", string(ModeContinuous), "Problem mode: tsp or continuous")
+	runSeconds := fs.Int("run-seconds", DefaultRunSeconds, "Simulation duration in seconds")
+
+	BindSimulationFlags(fs, &simCfg)
+	continuous.BindFlags(fs, &continuousCfg)
+
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return CLIConfig{}, err
+	}
+	if err := simCfg.Validate(); err != nil {
+		return CLIConfig{}, fmt.Errorf("invalid simulation config: %w", err)
+	}
+	if err := continuousCfg.Validate(); err != nil {
+		return CLIConfig{}, fmt.Errorf("invalid continuous config: %w", err)
+	}
+	if *runSeconds <= 0 {
+		return CLIConfig{}, fmt.Errorf("invalid run-seconds %d: must be > 0", *runSeconds)
+	}
+
+	return CLIConfig{
+		Mode:        ModeContinuous,
+		RunDuration: time.Duration(*runSeconds) * time.Second,
+		Simulation:  simCfg,
+		Continuous:  &continuousCfg,
+	}, nil
+}
+

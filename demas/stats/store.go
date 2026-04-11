@@ -2,9 +2,10 @@ package stats
 
 import (
 	"maps"
-	"math"
 	"sync"
 )
+
+type ScoreComparator func(newScore, currentBest float64) bool
 
 type Store struct {
 	mu sync.RWMutex
@@ -12,21 +13,25 @@ type Store struct {
 	AgentsPerIsland     map[int]int
 	MeetingsPerIsland   map[int]int
 	TotalMeetings       int
+	TotalBornAgents     int
+	TotalDeadAgents     int
 	SameIslandMeetings  int
 	CrossIslandMeetings int
 	BestScore           float64
+	BestIsland          int
+
+	isBetter ScoreComparator
 }
 
-func NewStore(initialAgentsPerIsland map[int]int) *Store {
+func NewStore(initialAgentsPerIsland map[int]int, maximum float64, isBetter ScoreComparator) *Store {
 	agentsCopy := make(map[int]int, len(initialAgentsPerIsland))
-	for k, v := range initialAgentsPerIsland {
-		agentsCopy[k] = v
-	}
+	maps.Copy(agentsCopy, initialAgentsPerIsland)
 
 	return &Store{
 		AgentsPerIsland:   agentsCopy,
 		MeetingsPerIsland: make(map[int]int),
-		BestScore:         math.Inf(1),
+		BestScore:         maximum,
+		isBetter:          isBetter,
 	}
 }
 
@@ -39,9 +44,16 @@ func (s *Store) Apply(event Event) bool {
 	switch event.EventType {
 	case EventBorn:
 		s.AgentsPerIsland[event.PrimaryIslandID]++
+		s.TotalBornAgents++
 
+		if s.isBetter(event.Score, s.BestScore) {
+			s.BestScore = event.Score
+			s.BestIsland = event.PrimaryIslandID
+			newBest = true
+		}
 	case EventDead:
 		s.AgentsPerIsland[event.PrimaryIslandID]--
+		s.TotalDeadAgents++
 
 	case EventMeeting:
 		s.TotalMeetings++
@@ -53,10 +65,6 @@ func (s *Store) Apply(event Event) bool {
 			s.CrossIslandMeetings++
 		}
 
-		if event.Score < s.BestScore {
-			s.BestScore = event.Score
-			newBest = true
-		}
 	}
 
 	return newBest
@@ -74,9 +82,12 @@ func (s *Store) Snapshot() Snapshot {
 
 	return Snapshot{
 		TotalMeetings:       s.TotalMeetings,
+		TotalBornAgents:     s.TotalBornAgents,
+		TotalDeadAgents:     s.TotalDeadAgents,
 		SameIslandMeetings:  s.SameIslandMeetings,
 		CrossIslandMeetings: s.CrossIslandMeetings,
 		BestScore:           s.BestScore,
+		BestIsland:          s.BestIsland,
 		AgentsPerIsland:     agentsCopy,
 		MeetingsPerIsland:   meetingsCopy,
 	}
